@@ -1,2 +1,3 @@
-# Ignore all files and subfolders in the .idea directory
-.idea/
+# Default ignored files
+/shelf/
+/.idea/workspace.xml
