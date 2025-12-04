@@ -21,51 +21,49 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
-import com.mongodb.client.MongoClient;
-import com.mongodb.client.MongoClients;
-import com.mongodb.ConnectionString;
+import com.mongodb.Mongo;
+import com.mongodb.MongoClient;
+import com.mongodb.MongoClientURI;
 
 import org.apache.camel.Endpoint;
-import org.apache.camel.support.DefaultComponent;
-import org.apache.camel.support.CamelContextHelper;
+import org.apache.camel.impl.UriEndpointComponent;
+import org.apache.camel.util.CamelContextHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * Represents the component that manages {@link MongoDbEndpoint}.
  */
-public class MongoDbComponent extends DefaultComponent {
+public class MongoDbComponent extends UriEndpointComponent {
     
     public static final Set<MongoDbOperation> WRITE_OPERATIONS = 
-            new HashSet<>(Arrays.asList(MongoDbOperation.insert, MongoDbOperation.save, 
+            new HashSet<MongoDbOperation>(Arrays.asList(MongoDbOperation.insert, MongoDbOperation.save, 
                     MongoDbOperation.update, MongoDbOperation.remove));
     private static final Logger LOG = LoggerFactory.getLogger(MongoDbComponent.class);
-    private volatile MongoClient mongoClient;
+    private volatile Mongo db;
 
     public MongoDbComponent() {
-        super();
+        super(MongoDbEndpoint.class);
     }
 
     /**
-     * Should access a singleton of type MongoClient
+     * Should access a singleton of type Mongo
      */
     protected Endpoint createEndpoint(String uri, String remaining, Map<String, Object> parameters) throws Exception {
         // TODO: this only supports one mongodb
       
-        if (mongoClient == null) {
-            // Create MongoClient with connection string
-            ConnectionString connectionString = new ConnectionString("mongodb://35.243.167.31:27017/mydb");
-            mongoClient = MongoClients.create(connectionString);
-        }
+    	MongoClient mongoClient = new MongoClient(new MongoClientURI("mongodb://35.243.167.31:27017/mydb"));
     	
-    	if (mongoClient == null) {
-            mongoClient = CamelContextHelper.mandatoryLookup(getCamelContext(), remaining, MongoClient.class);
-            LOG.debug("Resolved the connection with the name {} as {}", remaining, mongoClient);
+    	db=mongoClient;
+    	
+    	if (db == null) {
+            db = CamelContextHelper.mandatoryLookup(getCamelContext(), remaining, Mongo.class);
+            LOG.debug("Resolved the connection with the name {} as {}", remaining, db);
         }
 
         MongoDbEndpoint endpoint = new MongoDbEndpoint(uri, this);
         endpoint.setConnectionBean(remaining);
-        endpoint.setMongoConnection(mongoClient);
+        endpoint.setMongoConnection(db);
         setProperties(endpoint, parameters);
         
         return endpoint;
@@ -73,10 +71,10 @@ public class MongoDbComponent extends DefaultComponent {
 
     @Override
     protected void doShutdown() throws Exception {
-        if (mongoClient != null) {
+        if (db != null) {
             // properly close the underlying physical connection to MongoDB
-            LOG.debug("Closing the connection {} on {}", mongoClient, this);
-            mongoClient.close();
+            LOG.debug("Closing the connection {} on {}", db, this);
+            db.close();
         }
 
         super.doShutdown();
