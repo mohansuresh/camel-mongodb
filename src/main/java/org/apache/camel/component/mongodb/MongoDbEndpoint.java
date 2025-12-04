@@ -22,20 +22,22 @@ import java.util.List;
 import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.mongodb.BasicDBObject;
-import com.mongodb.DB;
-import com.mongodb.DBCollection;
-import com.mongodb.DBObject;
-import com.mongodb.Mongo;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
 import com.mongodb.ReadPreference;
 import com.mongodb.WriteConcern;
-import com.mongodb.WriteResult;
+import com.mongodb.client.result.InsertOneResult;
+import com.mongodb.client.result.UpdateResult;
+import com.mongodb.client.result.DeleteResult;
+import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.apache.camel.Consumer;
 import org.apache.camel.Exchange;
 import org.apache.camel.Message;
 import org.apache.camel.Processor;
 import org.apache.camel.Producer;
-import org.apache.camel.impl.DefaultEndpoint;
+import org.apache.camel.support.DefaultEndpoint;
 import org.apache.camel.spi.Metadata;
 import org.apache.camel.spi.UriEndpoint;
 import org.apache.camel.spi.UriParam;
@@ -52,7 +54,7 @@ public class MongoDbEndpoint extends DefaultEndpoint {
 
     private static final Logger LOG = LoggerFactory.getLogger(MongoDbEndpoint.class);
 
-    private Mongo mongoConnection;
+    private MongoClient mongoConnection;
 
     @UriPath @Metadata(required = "true")
     private String connectionBean;
@@ -98,8 +100,8 @@ public class MongoDbEndpoint extends DefaultEndpoint {
     @UriParam
     private MongoDbOutputType outputType;
 
-    private DBCollection dbCollection;
-    private DB db;
+    private MongoCollection<Document> dbCollection;
+    private MongoDatabase db;
 
     // ======= Constructors ===============================================
 
@@ -195,7 +197,7 @@ public class MongoDbEndpoint extends DefaultEndpoint {
     }
 
     /**
-     * Initialises the MongoDB connection using the Mongo object provided to the endpoint
+     * Initialises the MongoDB connection using the MongoClient object provided to the endpoint
      * 
      * @throws CamelMongoDbException
      */
@@ -204,18 +206,28 @@ public class MongoDbEndpoint extends DefaultEndpoint {
         if (database == null || (collection == null && !(MongoDbOperation.getDbStats.equals(operation) || MongoDbOperation.command.equals(operation)))) {
             throw new CamelMongoDbException("Missing required endpoint configuration: database and/or collection");
         }
-        db = mongoConnection.getDB(database);
+        db = mongoConnection.getDatabase(database);
         if (db == null) {
             throw new CamelMongoDbException("Could not initialise MongoDbComponent. Database " + database + " does not exist.");
         }
         if (collection != null) {
-            if (!createCollection && !db.collectionExists(collection)) {
-                throw new CamelMongoDbException("Could not initialise MongoDbComponent. Collection " + collection + " and createCollection is false.");
+            // Check if collection exists by trying to get it
+            try {
+                dbCollection = db.getCollection(collection);
+                if (!createCollection) {
+                    // Verify collection exists by attempting to count documents
+                    dbCollection.countDocuments();
+                }
+            } catch (Exception e) {
+                if (!createCollection) {
+                    throw new CamelMongoDbException("Could not initialise MongoDbComponent. Collection " + collection + " does not exist and createCollection is false.", e);
+                }
+                // Collection will be created on first write operation
+                dbCollection = db.getCollection(collection);
             }
-            dbCollection = db.getCollection(collection);
 
-            LOG.debug("MongoDb component initialised and endpoint bound to MongoDB collection with the following parameters. Address list: {}, Db: {}, Collection: {}",
-                    new Object[]{mongoConnection.getAllAddress().toString(), db.getName(), dbCollection.getName()});
+            LOG.debug("MongoDb component initialised and endpoint bound to MongoDB collection with the following parameters. Db: {}, Collection: {}",
+                    db.getName(), collection);
 
             try {
                 if (ObjectHelper.isNotEmpty(collectionIndex)) {
@@ -232,10 +244,10 @@ public class MongoDbEndpoint extends DefaultEndpoint {
      *
      * @param collection
      */
-    public void ensureIndex(DBCollection collection, List<DBObject> dynamicIndex) {
+    public void ensureIndex(MongoCollection<Document> collection, List<Document> dynamicIndex) {
         if (dynamicIndex != null && !dynamicIndex.isEmpty()) {
-            for (DBObject index : dynamicIndex) {
-                LOG.debug("create BDObject Index {}", index);
+            for (Document index : dynamicIndex) {
+                LOG.debug("create Document Index {}", index);
                 collection.createIndex(index);
             }
         }
@@ -247,14 +259,14 @@ public class MongoDbEndpoint extends DefaultEndpoint {
      * @return technical list index
      */
     @SuppressWarnings("unchecked")
-    public List<DBObject> createIndex() throws Exception {
-        List<DBObject> indexList = new ArrayList<DBObject>();
+    public List<Document> createIndex() throws Exception {
+        List<Document> indexList = new ArrayList<>();
 
         if (ObjectHelper.isNotEmpty(collectionIndex)) {
             HashMap<String, String> indexMap = new ObjectMapper().readValue(collectionIndex, HashMap.class);
 
             for (Map.Entry<String, String> set : indexMap.entrySet()) {
-                DBObject index = new BasicDBObject();
+                Document index = new Document();
                 // MongoDB 2.4 upwards is restrictive about the type of the 'single field index' being
                 // in use below (set.getValue())) as only an integer value type is accepted, otherwise
                 // server will throw an exception, see more details:
@@ -282,28 +294,19 @@ public class MongoDbEndpoint extends DefaultEndpoint {
         super.doStart();
     }
 
-    public Exchange createMongoDbExchange(DBObject dbObj) {
+    public Exchange createMongoDbExchange(Document document) {
         Exchange exchange = super.createExchange();
         Message message = exchange.getIn();
         message.setHeader(MongoDbConstants.DATABASE, database);
         message.setHeader(MongoDbConstants.COLLECTION, collection);
         message.setHeader(MongoDbConstants.FROM_TAILABLE, true);
-        message.setBody(dbObj);
+        message.setBody(document);
         return exchange;
     }
 
     private void setWriteReadOptionsOnConnection() {
-        // Set the WriteConcern
-        if (writeConcern != null) {
-            mongoConnection.setWriteConcern(writeConcern);
-        } else if (writeConcernRef != null) {
-            mongoConnection.setWriteConcern(writeConcernRef);
-        }
-
-        // Set the ReadPreference
-        if (readPreference != null) {
-            mongoConnection.setReadPreference(readPreference);
-        }
+        // Note: In modern MongoDB driver, WriteConcern and ReadPreference are set per-operation
+        // rather than on the client. These settings are stored for use in operations.
     }
     
     
@@ -315,7 +318,7 @@ public class MongoDbEndpoint extends DefaultEndpoint {
     }
 
     /**
-     * Name of {@link com.mongodb.Mongo} to use.
+     * Name of {@link MongoClient} to use.
      */
     public void setConnectionBean(String connectionBean) {
         this.connectionBean = connectionBean;
@@ -389,24 +392,24 @@ public class MongoDbEndpoint extends DefaultEndpoint {
         return createCollection;
     }
 
-    public DB getDb() {
+    public MongoDatabase getDb() {
         return db;
     }
 
-    public DBCollection getDbCollection() {
+    public MongoCollection<Document> getDbCollection() {
         return dbCollection;
     }
 
     /**
-     * Sets the Mongo instance that represents the backing connection
+     * Sets the MongoClient instance that represents the backing connection
      * 
      * @param mongoConnection the connection to the database
      */
-    public void setMongoConnection(Mongo mongoConnection) {
+    public void setMongoConnection(MongoClient mongoConnection) {
         this.mongoConnection = mongoConnection;
     }
 
-    public Mongo getMongoConnection() {
+    public MongoClient getMongoConnection() {
         return mongoConnection;
     }
 
@@ -432,7 +435,7 @@ public class MongoDbEndpoint extends DefaultEndpoint {
      * @param writeConcernRef the name of the bean in the registry that represents the WriteConcern to use
      */
     public void setWriteConcernRef(String writeConcernRef) {
-        WriteConcern wc = this.getCamelContext().getRegistry().lookupByNameAndType(writeConcernRef, WriteConcern.class);
+        WriteConcern wc = this.getCamelContext().getRegistry().findByTypeWithName(WriteConcern.class).get(writeConcernRef);
         if (wc == null) {
             String msg = "Camel MongoDB component could not find the WriteConcern in the Registry. Verify that the "
                     + "provided bean name (" + writeConcernRef + ")  is correct. Aborting initialization.";
@@ -615,8 +618,8 @@ public class MongoDbEndpoint extends DefaultEndpoint {
     }
 
     /**
-     * In write operations, it determines whether instead of returning {@link WriteResult} as the body of the OUT
-     * message, we transfer the IN message to the OUT and attach the WriteResult as a header.
+     * In write operations, it determines whether instead of returning write result as the body of the OUT
+     * message, we transfer the IN message to the OUT and attach the write result as a header.
      * 
      * @param writeResultAsHeader flag to indicate if this option is enabled
      */

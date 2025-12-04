@@ -29,8 +29,10 @@
   <properties>
     <camel.osgi.export.pkg>org.apache.camel.component.mongodb.*</camel.osgi.export.pkg>
     <camel.osgi.export.service>org.apache.camel.spi.ComponentResolver;component=mongodb</camel.osgi.export.service>
-  <camel.version>2.17.4</camel.version>
-</properties>
+    <camel.version>4.4.0</camel.version>
+    <mongodb.driver.version>5.1.0</mongodb.driver.version>
+    <jackson.version>2.17.0</jackson.version>
+  </properties>
 
   <dependencies>
 
@@ -49,11 +51,11 @@
 <scope>provided</scope>
 </dependency>
 
-    <!-- MongoDB driver dependency -->
+    <!-- MongoDB driver dependency - Updated to modern driver -->
     <dependency>
       <groupId>org.mongodb</groupId>
-      <artifactId>mongo-java-driver</artifactId>
-      <version>3.2.2</version>
+      <artifactId>mongodb-driver-sync</artifactId>
+      <version>${mongodb.driver.version}</version>
     </dependency>
 
     <!-- test dependencies -->
@@ -61,11 +63,11 @@
     
     
     
-  <dependency>
-<groupId>com.fasterxml.jackson.core</groupId>
-<artifactId>jackson-databind</artifactId>
-<version>2.7.8</version>
-</dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <version>${jackson.version}</version>
+    </dependency>
 </dependencies>
 
     <!-- skip tests on AIX and HP-UX -->
@@ -115,10 +117,11 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>
-        <version>2.3.2</version>
+        <version>3.11.0</version>
         <configuration>
-          <source>1.7</source>
-          <target>1.7</target>
+          <source>17</source>
+          <target>17</target>
+          <release>17</release>
         </configuration>
       </plugin>
       
