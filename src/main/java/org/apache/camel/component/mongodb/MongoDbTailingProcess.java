@@ -17,12 +17,10 @@
 
 package org.apache.camel.component.mongodb;
 
-import com.mongodb.BasicDBObject;
-import com.mongodb.Bytes;
-import com.mongodb.DBCollection;
-import com.mongodb.DBCursor;
-import com.mongodb.DBObject;
-import com.mongodb.MongoCursorNotFoundException;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoCursor;
+import com.mongodb.CursorType;
+import org.bson.Document;
 
 import org.apache.camel.Exchange;
 
@@ -37,7 +35,7 @@ public class MongoDbTailingProcess implements Runnable {
     public volatile boolean keepRunning = true;
     public volatile boolean stopped; // = false
     
-    private final DBCollection dbCol;
+    private final MongoCollection<Document> dbCol;
     private final MongoDbEndpoint endpoint;
     private final MongoDbTailableCursorConsumer consumer;
     
@@ -45,7 +43,7 @@ public class MongoDbTailingProcess implements Runnable {
     private final long cursorRegenerationDelay;
     private final boolean cursorRegenerationDelayEnabled;
     
-    private DBCursor cursor;
+    private MongoCursor<Document> cursor;
     private MongoDbTailTrackingManager tailTracking;
     
 
@@ -58,7 +56,7 @@ public class MongoDbTailingProcess implements Runnable {
         this.cursorRegenerationDelayEnabled = !(this.cursorRegenerationDelay == 0);
     }
 
-    public DBCursor getCursor() {
+    public MongoCursor<Document> getCursor() {
         return cursor;
     }
 
@@ -139,26 +137,26 @@ public class MongoDbTailingProcess implements Runnable {
      * The heart of the tailing process.
      */
     private void doRun() {
-        // while the cursor has more values, keepRunning is true and the cursorId is not 0, which symbolizes that the cursor is dead
+        // while the cursor has more values and keepRunning is true
         try {
-            while (cursor.hasNext() && cursor.getCursorId() != 0  && keepRunning) {
-                DBObject dbObj = cursor.next();
-                Exchange exchange = endpoint.createMongoDbExchange(dbObj);
+            while (cursor.hasNext() && keepRunning) {
+                Document doc = cursor.next();
+                Exchange exchange = endpoint.createMongoDbExchange(doc);
                 try {
                     if (LOG.isTraceEnabled()) {
-                        LOG.trace("Sending exchange: {}, ObjectId: {}", exchange, dbObj.get("_id"));
+                        LOG.trace("Sending exchange: {}, ObjectId: {}", exchange, doc.get("_id"));
                     }
                     consumer.getProcessor().process(exchange);
                 } catch (Exception e) {
                     // do nothing
                 }
-                tailTracking.setLastVal(dbObj);
+                tailTracking.setLastVal(doc);
             }
-        } catch (MongoCursorNotFoundException e) {
+        } catch (Exception e) {
             // we only log the warning if we are not stopping, otherwise it is expected because the stop() method kills the cursor just in case it is blocked
             // waiting for more data to arrive
             if (keepRunning) {
-                LOG.debug("Cursor not found exception from MongoDB, will regenerate cursor. This is normal behaviour with tailable cursors.", e);
+                LOG.debug("Cursor exception from MongoDB, will regenerate cursor. This is normal behaviour with tailable cursors.", e);
             }
         }
 
@@ -168,15 +166,15 @@ public class MongoDbTailingProcess implements Runnable {
     }
 
     // no arguments, will ask DB what the last updated Id was (checking persistent storage)
-    private DBCursor initializeCursor() {
+    private MongoCursor<Document> initializeCursor() {
         Object lastVal = tailTracking.lastVal;
         // lastVal can be null if we are initializing and there is no persistence enabled
-        DBCursor answer;
+        MongoCursor<Document> answer;
         if (lastVal == null) {
-            answer = dbCol.find().addOption(Bytes.QUERYOPTION_TAILABLE).addOption(Bytes.QUERYOPTION_AWAITDATA);
+            answer = dbCol.find().cursorType(CursorType.TailableAwait).iterator();
         } else {
-            DBObject queryObj = new BasicDBObject(tailTracking.getIncreasingFieldName(), new BasicDBObject("$gt", lastVal));
-            answer = dbCol.find(queryObj).addOption(Bytes.QUERYOPTION_TAILABLE).addOption(Bytes.QUERYOPTION_AWAITDATA);
+            Document queryObj = new Document(tailTracking.getIncreasingFieldName(), new Document("$gt", lastVal));
+            answer = dbCol.find(queryObj).cursorType(CursorType.TailableAwait).iterator();
         }
         return answer;
     }

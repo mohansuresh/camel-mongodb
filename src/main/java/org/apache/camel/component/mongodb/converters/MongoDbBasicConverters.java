@@ -23,17 +23,12 @@ import java.io.InputStream;
 import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.mongodb.BasicDBObject;
-import com.mongodb.DBObject;
-import com.mongodb.util.JSON;
-import com.mongodb.util.JSONCallback;
+import org.bson.Document;
 
 import org.apache.camel.Converter;
 import org.apache.camel.Exchange;
 import org.apache.camel.converter.IOConverter;
-import org.apache.camel.util.IOHelper;
-import org.bson.BSONCallback;
-import org.bson.BasicBSONDecoder;
+import org.apache.camel.support.IOHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -49,78 +44,56 @@ public final class MongoDbBasicConverters {
     }
     
     @Converter
-    public static DBObject fromMapToDBObject(Map<?, ?> map) {
-        return new BasicDBObject(map);
+    public static Document fromMapToDocument(Map<?, ?> map) {
+        return new Document(map);
     }
     
     @Converter
-    public static Map<String, Object> fromBasicDBObjectToMap(BasicDBObject basicDbObject) {
-        return basicDbObject;
+    public static Map<String, Object> fromDocumentToMap(Document document) {
+        return document;
     }
     
     @Converter
-    public static DBObject fromStringToDBObject(String s) {
-        DBObject answer = null;
+    public static Document fromStringToDocument(String s) {
+        Document answer = null;
         try {
-            answer = (DBObject) JSON.parse(s);
+            answer = Document.parse(s);
         } catch (Exception e) {
-            LOG.warn("String -> DBObject conversion selected, but the following exception occurred. Returning null.", e);
+            LOG.warn("String -> Document conversion selected, but the following exception occurred. Returning null.", e);
         }
         
         return answer;
     }
    
     @Converter
-    public static DBObject fromFileToDBObject(File f, Exchange exchange) throws FileNotFoundException {
-        return fromInputStreamToDBObject(new FileInputStream(f), exchange);
+    public static Document fromFileToDocument(File f, Exchange exchange) throws FileNotFoundException {
+        return fromInputStreamToDocument(new FileInputStream(f), exchange);
     }
     
     @Converter
-    public static DBObject fromInputStreamToDBObject(InputStream is, Exchange exchange) {
-        DBObject answer = null;
+    public static Document fromInputStreamToDocument(InputStream is, Exchange exchange) {
+        Document answer = null;
         try {
             byte[] input = IOConverter.toBytes(is);
-            
-            if (isBson(input)) {
-                BSONCallback callback = new JSONCallback();
-                new BasicBSONDecoder().decode(input, callback);
-                answer = (DBObject) callback.get();
-            } else {
-                answer = (DBObject) JSON.parse(IOConverter.toString(input, exchange));
-            }
+            String jsonString = IOConverter.toString(input, exchange);
+            answer = Document.parse(jsonString);
         } catch (Exception e) {
-            LOG.warn("String -> DBObject conversion selected, but the following exception occurred. Returning null.", e);
+            LOG.warn("InputStream -> Document conversion selected, but the following exception occurred. Returning null.", e);
         } finally {
             // we need to make sure to close the input stream
             IOHelper.close(is, "InputStream", LOG);
         }
         return answer;
     }
-   
-    /** 
-     * If the input starts with any number of whitespace characters and then a '{' character, we
-     * assume it is JSON rather than BSON. There are probably no useful BSON blobs that fit this pattern
-     */
-    private static boolean isBson(byte[] input) {
-        int i = 0;
-        while (i < input.length) {
-            if (input[i] == '{') {
-                return false;
-            } else if (!Character.isWhitespace(input[i])) {
-                return true;
-            }
-        }
-        return true;
-    }
 
     @Converter
-    public static DBObject fromAnyObjectToDBObject(Object value) {
-        BasicDBObject answer;
+    public static Document fromAnyObjectToDocument(Object value) {
+        Document answer;
         try {
             Map<?, ?> m = OBJECT_MAPPER.convertValue(value, Map.class);
-            answer = new BasicDBObject(m);
+            answer = new Document(m);
         } catch (Exception e) {
-            LOG.warn("Conversion has fallen back to generic Object -> DBObject, but unable to convert type {}. Returning null.", 
+            LOG.warn("Conversion has fallen back to generic Object -> Document, but unable to convert type {}. Returning null.", 
                     value.getClass().getCanonicalName());
             return null;
         }
