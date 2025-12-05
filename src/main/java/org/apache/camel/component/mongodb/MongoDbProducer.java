@@ -32,8 +32,8 @@ import com.mongodb.WriteResult;
 import org.apache.camel.Exchange;
 import org.apache.camel.Message;
 import org.apache.camel.TypeConverter;
-import org.apache.camel.impl.DefaultProducer;
-import org.apache.camel.util.MessageHelper;
+import org.apache.camel.support.DefaultProducer;
+import org.apache.camel.support.MessageHelper;
 import org.apache.camel.util.ObjectHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -479,11 +479,11 @@ public class MongoDbProducer extends DefaultProducer {
     }
     
     private void processAndTransferWriteResult(WriteResult result, Exchange exchange) {
-        // determine where to set the WriteResult: as the OUT body or as an IN message header
+        // determine where to set the WriteResult: as the message body or as a message header
         if (endpoint.isWriteResultAsHeader()) {
-            exchange.getOut().setHeader(MongoDbConstants.WRITERESULT, result);
+            exchange.getMessage().setHeader(MongoDbConstants.WRITERESULT, result);
         } else {
-            exchange.getOut().setBody(result);
+            exchange.getMessage().setBody(result);
         }
     }
 
@@ -523,8 +523,7 @@ public class MongoDbProducer extends DefaultProducer {
     }
 
     private Message prepareResponseMessage(Exchange exchange, MongoDbOperation operation) {
-        Message answer = exchange.getOut();
-        MessageHelper.copyHeaders(exchange.getIn(), answer, false);
+        Message answer = exchange.getMessage();
         if (isWriteOperation(operation) && endpoint.isWriteResultAsHeader()) {
             answer.setBody(exchange.getIn().getBody());
         }

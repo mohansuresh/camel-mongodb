@@ -26,7 +26,7 @@ import com.mongodb.MongoClient;
 import com.mongodb.MongoClientURI;
 
 import org.apache.camel.Endpoint;
-import org.apache.camel.impl.UriEndpointComponent;
+import org.apache.camel.support.DefaultComponent;
 import org.apache.camel.util.CamelContextHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,7 +34,7 @@ import org.slf4j.LoggerFactory;
 /**
  * Represents the component that manages {@link MongoDbEndpoint}.
  */
-public class MongoDbComponent extends UriEndpointComponent {
+public class MongoDbComponent extends DefaultComponent {
     
     public static final Set<MongoDbOperation> WRITE_OPERATIONS = 
             new HashSet<MongoDbOperation>(Arrays.asList(MongoDbOperation.insert, MongoDbOperation.save, 
@@ -43,7 +43,7 @@ public class MongoDbComponent extends UriEndpointComponent {
     private volatile Mongo db;
 
     public MongoDbComponent() {
-        super(MongoDbEndpoint.class);
+        super();
     }
 
     /**

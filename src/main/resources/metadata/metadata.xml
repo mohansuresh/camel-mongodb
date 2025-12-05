@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<ComponentMetadata ComponentId="ctype::Adapter/cname::MongoDB/vendor::ApacheCamel/version::2.17.4" ComponentName="MongoDB" UIElementType="Adapter" IsExtension="false" IsFinal="true" IsPreserves="true" IsDefaultGenerator="true" ComponentDisplayName="MongoDB" xmlns:gen="http://www.sap.hci.adk.com/gen" xmlns:bp="http://www.adk.gen/xmlns/blueprint">
+<ComponentMetadata ComponentId="ctype::Adapter/cname::MongoDB/vendor::ApacheCamel/version::3.14.7" ComponentName="MongoDB" UIElementType="Adapter" IsExtension="false" IsFinal="true" IsPreserves="true" IsDefaultGenerator="true" ComponentDisplayName="MongoDB" xmlns:gen="http://www.sap.hci.adk.com/gen" xmlns:bp="http://www.adk.gen/xmlns/blueprint">
     <Variant VariantName="MongoDB Component Sender" VariantId="ctype::AdapterVariant/cname::MongoDB/vendor::ApacheCamel/tp::mongodb/mp::mongodb/direction::Sender" MetadataVersion="2.0" gen:RuntimeComponentBaseUri="mongodb" AttachmentBehavior="Preserve">
         <InputContent Cardinality="1" Scope="outsidepool" MessageCardinality="1" isStreaming="false">
             <Content>

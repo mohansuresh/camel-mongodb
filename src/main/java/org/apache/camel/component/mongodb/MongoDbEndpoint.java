@@ -35,7 +35,7 @@ import org.apache.camel.Exchange;
 import org.apache.camel.Message;
 import org.apache.camel.Processor;
 import org.apache.camel.Producer;
-import org.apache.camel.impl.DefaultEndpoint;
+import org.apache.camel.support.DefaultEndpoint;
 import org.apache.camel.spi.Metadata;
 import org.apache.camel.spi.UriEndpoint;
 import org.apache.camel.spi.UriParam;
@@ -284,7 +284,7 @@ public class MongoDbEndpoint extends DefaultEndpoint {
 
     public Exchange createMongoDbExchange(DBObject dbObj) {
         Exchange exchange = super.createExchange();
-        Message message = exchange.getIn();
+        Message message = exchange.getMessage();
         message.setHeader(MongoDbConstants.DATABASE, database);
         message.setHeader(MongoDbConstants.COLLECTION, collection);
         message.setHeader(MongoDbConstants.FROM_TAILABLE, true);
