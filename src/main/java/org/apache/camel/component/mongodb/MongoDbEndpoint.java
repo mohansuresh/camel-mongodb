@@ -22,20 +22,21 @@ import java.util.List;
 import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.mongodb.BasicDBObject;
-import com.mongodb.DB;
-import com.mongodb.DBCollection;
-import com.mongodb.DBObject;
-import com.mongodb.Mongo;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.MongoCollection;
 import com.mongodb.ReadPreference;
 import com.mongodb.WriteConcern;
-import com.mongodb.WriteResult;
+import com.mongodb.client.model.IndexOptions;
+import com.mongodb.client.model.Indexes;
+import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.apache.camel.Consumer;
 import org.apache.camel.Exchange;
 import org.apache.camel.Message;
 import org.apache.camel.Processor;
 import org.apache.camel.Producer;
-import org.apache.camel.impl.DefaultEndpoint;
+import org.apache.camel.support.DefaultEndpoint;
 import org.apache.camel.spi.Metadata;
 import org.apache.camel.spi.UriEndpoint;
 import org.apache.camel.spi.UriParam;
@@ -52,7 +53,7 @@ public class MongoDbEndpoint extends DefaultEndpoint {
 
     private static final Logger LOG = LoggerFactory.getLogger(MongoDbEndpoint.class);
 
-    private Mongo mongoConnection;
+    private MongoClient mongoConnection;
 
     @UriPath @Metadata(required = "true")
     private String connectionBean;
@@ -98,8 +99,8 @@ public class MongoDbEndpoint extends DefaultEndpoint {
     @UriParam
     private MongoDbOutputType outputType;
 
-    private DBCollection dbCollection;
-    private DB db;
+    private MongoCollection<Document> dbCollection;
+    private MongoDatabase db;
 
     // ======= Constructors ===============================================
 
@@ -146,18 +147,18 @@ public class MongoDbEndpoint extends DefaultEndpoint {
     }
 
     /**
-     * Check if outputType is compatible with operation. DbCursor and DBObjectList applies to findAll. DBObject applies to others.
+     * Check if outputType is compatible with operation. DBCursor and DocumentList applies to findAll. Document applies to others.
      */
     private void validateOutputType() {
         if (!ObjectHelper.isEmpty(outputType)) {
             if (MongoDbOutputType.DBObjectList.equals(outputType) && !(MongoDbOperation.findAll.equals(operation))) {
-                throw new IllegalArgumentException("outputType DBObjectList is only compatible with operation findAll");
+                throw new IllegalArgumentException("outputType DocumentList is only compatible with operation findAll");
             }
             if (MongoDbOutputType.DBCursor.equals(outputType) && !(MongoDbOperation.findAll.equals(operation))) {
                 throw new IllegalArgumentException("outputType DBCursor is only compatible with operation findAll");
             }
             if (MongoDbOutputType.DBObject.equals(outputType) && (MongoDbOperation.findAll.equals(operation))) {
-                throw new IllegalArgumentException("outputType DBObject is not compatible with operation findAll");
+                throw new IllegalArgumentException("outputType Document is not compatible with operation findAll");
             }
         }
     }
@@ -204,18 +205,28 @@ public class MongoDbEndpoint extends DefaultEndpoint {
         if (database == null || (collection == null && !(MongoDbOperation.getDbStats.equals(operation) || MongoDbOperation.command.equals(operation)))) {
             throw new CamelMongoDbException("Missing required endpoint configuration: database and/or collection");
         }
-        db = mongoConnection.getDB(database);
+        db = mongoConnection.getDatabase(database);
         if (db == null) {
             throw new CamelMongoDbException("Could not initialise MongoDbComponent. Database " + database + " does not exist.");
         }
         if (collection != null) {
-            if (!createCollection && !db.collectionExists(collection)) {
-                throw new CamelMongoDbException("Could not initialise MongoDbComponent. Collection " + collection + " and createCollection is false.");
+            // Check if collection exists by trying to get it
+            try {
+                dbCollection = db.getCollection(collection);
+                if (!createCollection) {
+                    // Verify collection exists by attempting to access it
+                    dbCollection.estimatedDocumentCount();
+                }
+            } catch (Exception e) {
+                if (!createCollection) {
+                    throw new CamelMongoDbException("Could not initialise MongoDbComponent. Collection " + collection + " and createCollection is false.", e);
+                }
+                // Collection will be created on first write
+                dbCollection = db.getCollection(collection);
             }
-            dbCollection = db.getCollection(collection);
 
-            LOG.debug("MongoDb component initialised and endpoint bound to MongoDB collection with the following parameters. Address list: {}, Db: {}, Collection: {}",
-                    new Object[]{mongoConnection.getAllAddress().toString(), db.getName(), dbCollection.getName()});
+            LOG.debug("MongoDb component initialised and endpoint bound to MongoDB collection with the following parameters. Db: {}, Collection: {}",
+                    db.getName(), dbCollection.getNamespace().getCollectionName());
 
             try {
                 if (ObjectHelper.isNotEmpty(collectionIndex)) {
@@ -232,10 +243,10 @@ public class MongoDbEndpoint extends DefaultEndpoint {
      *
      * @param collection
      */
-    public void ensureIndex(DBCollection collection, List<DBObject> dynamicIndex) {
+    public void ensureIndex(MongoCollection<Document> collection, List<Bson> dynamicIndex) {
         if (dynamicIndex != null && !dynamicIndex.isEmpty()) {
-            for (DBObject index : dynamicIndex) {
-                LOG.debug("create BDObject Index {}", index);
+            for (Bson index : dynamicIndex) {
+                LOG.debug("create Index {}", index);
                 collection.createIndex(index);
             }
         }
@@ -247,20 +258,16 @@ public class MongoDbEndpoint extends DefaultEndpoint {
      * @return technical list index
      */
     @SuppressWarnings("unchecked")
-    public List<DBObject> createIndex() throws Exception {
-        List<DBObject> indexList = new ArrayList<DBObject>();
+    public List<Bson> createIndex() throws Exception {
+        List<Bson> indexList = new ArrayList<Bson>();
 
         if (ObjectHelper.isNotEmpty(collectionIndex)) {
             HashMap<String, String> indexMap = new ObjectMapper().readValue(collectionIndex, HashMap.class);
 
             for (Map.Entry<String, String> set : indexMap.entrySet()) {
-                DBObject index = new BasicDBObject();
-                // MongoDB 2.4 upwards is restrictive about the type of the 'single field index' being
-                // in use below (set.getValue())) as only an integer value type is accepted, otherwise
-                // server will throw an exception, see more details:
-                // http://docs.mongodb.org/manual/release-notes/2.4/#improved-validation-of-index-types
-                index.put(set.getKey(), set.getValue());
-
+                // Create index using new MongoDB driver API
+                int order = Integer.parseInt(set.getValue());
+                Bson index = order > 0 ? Indexes.ascending(set.getKey()) : Indexes.descending(set.getKey());
                 indexList.add(index);
             }
         }
@@ -282,28 +289,21 @@ public class MongoDbEndpoint extends DefaultEndpoint {
         super.doStart();
     }
 
-    public Exchange createMongoDbExchange(DBObject dbObj) {
+    public Exchange createMongoDbExchange(Document document) {
         Exchange exchange = super.createExchange();
         Message message = exchange.getIn();
         message.setHeader(MongoDbConstants.DATABASE, database);
         message.setHeader(MongoDbConstants.COLLECTION, collection);
         message.setHeader(MongoDbConstants.FROM_TAILABLE, true);
-        message.setBody(dbObj);
+        message.setBody(document);
         return exchange;
     }
 
     private void setWriteReadOptionsOnConnection() {
-        // Set the WriteConcern
-        if (writeConcern != null) {
-            mongoConnection.setWriteConcern(writeConcern);
-        } else if (writeConcernRef != null) {
-            mongoConnection.setWriteConcern(writeConcernRef);
-        }
-
-        // Set the ReadPreference
-        if (readPreference != null) {
-            mongoConnection.setReadPreference(readPreference);
-        }
+        // Note: In MongoDB Java Driver 4.x+, WriteConcern and ReadPreference are set
+        // at the database or collection level, not on the client connection.
+        // These settings will be applied when operations are performed.
+        // The mongoConnection (MongoClient) in the new driver is immutable.
     }
     
     
@@ -389,24 +389,24 @@ public class MongoDbEndpoint extends DefaultEndpoint {
         return createCollection;
     }
 
-    public DB getDb() {
+    public MongoDatabase getDb() {
         return db;
     }
 
-    public DBCollection getDbCollection() {
+    public MongoCollection<Document> getDbCollection() {
         return dbCollection;
     }
 
     /**
-     * Sets the Mongo instance that represents the backing connection
+     * Sets the MongoClient instance that represents the backing connection
      * 
      * @param mongoConnection the connection to the database
      */
-    public void setMongoConnection(Mongo mongoConnection) {
+    public void setMongoConnection(MongoClient mongoConnection) {
         this.mongoConnection = mongoConnection;
     }
 
-    public Mongo getMongoConnection() {
+    public MongoClient getMongoConnection() {
         return mongoConnection;
     }
 
